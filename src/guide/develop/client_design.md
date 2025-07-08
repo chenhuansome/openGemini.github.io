@@ -411,3 +411,59 @@ $operation failed, error: $error_details
 # example:
 writePoint failed, unmarshall response body error: json: cannot unmarshal number ...
 ```
+# OpenTelemetry 集成设计
+为提升OpenGemini Go客户端的可观测性，便于追踪查询与写入操作的性能、错误等信息，本方案采用拦截器模式集成OpenTelemetry，实现全链路追踪。该设计支持非侵入式扩展，可与其他拦截器（如日志、认证）共存，同时保持对原生客户端的最小修改。
+
+## 定义拦截器接口
+
+```mermaid
+interface Interceptor {
++ context.Context QueryBefore(context.Context, string)
++ void QueryAfter(context.Context, string, error)
++ context.Context WriteBefore(context.Context, []byte)
++ void WriteAfter(context.Context, []byte, error)
+}
+```
+
+## 定义基础客户端类，关联拦截器接口
+
+```mermaid
+class Client {
+- []Interceptor interceptors
++ Client(interceptors ...Interceptor)
++ AddInterceptor(interceptors ...Interceptor)
++ context.Context doQueryBefore(context.Context, string)
++ void doQueryAfter(context.Context, string, error)
++ context.Context doWriteBefore(context.Context, []byte)
++ void doWriteAfter(context.Context, []byte, error)
+}
+```
+
+## 定义集成 OpenTelemetry 的拦截器实现类，实现 Interceptor 接口
+
+```mermaid
+class OtelClient {
+- trace.Tracer tracer
++ OtelClient()
++ context.Context QueryBefore(context.Context, string)
++ void QueryAfter(context.Context, string, error)
++ context.Context WriteBefore(context.Context, []byte)
++ void WriteAfter(context.Context, []byte, error)
+}
+```
+
+## 定义主函数使用示例相关流程（简化体现调用关系）
+
+```mermaid
+class Main {
++ static func initOtel() func()
++ static func main()
++ static func performQuery(context.Context, string) error
+}
+
+接口与类之间的实现、关联关系
+Client --> Interceptor : 包含多个
+OtelClient --> Interceptor : 实现
+Main --> Client : 使用
+Main --> OtelClient : 初始化并添加到 Client
+```
