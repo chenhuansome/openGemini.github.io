@@ -411,10 +411,10 @@ $operation failed, error: $error_details
 # example:
 writePoint failed, unmarshall response body error: json: cannot unmarshal number ...
 ```
-# OpenTelemetry 集成设计
-为提升OpenGemini Go客户端的可观测性，便于追踪查询与写入操作的性能、错误等信息，本方案采用拦截器模式集成OpenTelemetry，实现全链路追踪。该设计支持非侵入式扩展，可与其他拦截器（如日志、认证）共存，同时保持对原生客户端的最小修改。
+# OpenTelemetry integration design
+To enhance the observability of the OpenGemini Go client and facilitate tracking of performance metrics, errors, and other information related to query and write operations, this solution adopts the interceptor pattern to integrate OpenTelemetry, enabling full-link tracing. The design supports non-intrusive extensions, allowing coexistence with other interceptors (such as logging and authentication interceptors) while minimizing modifications to the original client.
 
-## 定义拦截器接口
+## Define the interceptor interface 
 
 ```mermaid
 interface Interceptor {
@@ -425,7 +425,7 @@ interface Interceptor {
 }
 ```
 
-## 定义基础客户端类，关联拦截器接口
+## Define the base client class,associated with the Interceptor interface
 
 ```mermaid
 class Client {
@@ -439,7 +439,7 @@ class Client {
 }
 ```
 
-## 定义集成 OpenTelemetry 的拦截器实现类，实现 Interceptor 接口
+## Define the interceptor implementation class integrating OpenTelemetry,implementing the Interceptor interface
 
 ```mermaid
 class OtelClient {
@@ -452,7 +452,7 @@ class OtelClient {
 }
 ```
 
-## 定义主函数使用示例相关流程（简化体现调用关系）
+## Define processes related to main function usage examples (simplified to show invocation relationships)
 
 ```mermaid
 class Main {
