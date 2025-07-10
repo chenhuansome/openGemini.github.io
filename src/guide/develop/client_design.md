@@ -461,9 +461,9 @@ class Main {
 + static func performQuery(context.Context, string) error
 }
 
-接口与类之间的实现、关联关系
-Client --> Interceptor : 包含多个
-OtelClient --> Interceptor : 实现
-Main --> Client : 使用
-Main --> OtelClient : 初始化并添加到 Client
+The implementation and association relationships between interfaces and classes
+Client --> Interceptor : contains multiple
+OtelClient --> Interceptor : implement
+Main --> Client : use
+Main --> OtelClient : initialize and add to client
 ```
