@@ -245,6 +245,179 @@ classDiagram
     SeriesResult "1" *-- "0..*" Series: contains
 ```
 
+# OpenTelemetry integration design
+To enhance the observability of the OpenGemini client and facilitate tracking of performance metrics, errors, and other information related to query and write operations, this solution adopts the interceptor pattern to integrate OpenTelemetry, enabling full-link tracing. The design supports non-intrusive extensions, allowing coexistence with other interceptors (such as logging and authentication interceptors) while minimizing modifications to the original client.
+
+## Interceptor design
+The interceptor pattern defines a standardized interface to hook into client operations (query/write) and inject telemetry logic.
+
+
+```mermaid
+Interceptor interface {
+	Query(ctx context.Context, query *InterceptorQuery) InterceptorClosure
+	Write(ctx context.Context, write *InterceptorWrite) InterceptorClosure
+}
+```
+
+## Define the base client class,associated with the Interceptor interface
+The base  Client  class manages a collection of interceptors, allowing dynamic registration and execution of interceptor logic during client operations.
+
+```mermaid
+class Client {
+- []Interceptor interceptors
+}
+```
+
+## Define the interceptor implementation class integrating OpenTelemetry,implementing the Interceptor interface
+The OtelClient class implements the Interceptor interface, embedding OpenTelemetry logic to capture traces, metrics, and logs for client operations.
+
+```mermaid
+class OtelClient {
+    Interceptor
+}
+```
+
+## Tracing system core module
+
+```mermaid
+    class TraceContext {
+        + traceId: String
+        + parentTraceId: String
+        + operationName: String
+        + timestamp: Long
+        + attributes: Map~String, Object~
+        + createChildContext() : TraceContext
+        + addAttribute(key, value) : void
+        + getAttribute(key) : Object
+    }
+
+    class ContextManager {
+        + getCurrentContext() : TraceContext
+        + bindContext(context, task) : void
+        + unbindContext() : TraceContext
+    }
+
+    class OperationInterceptor {
+        <<Interface>>
+        + preProcess(operationContext) : void
+        + postProcess(operationContext, result) : void
+        + errorProcess(operationContext, exception) : void
+    }
+
+    class QueryInterceptor {
+        + preProcess(operationContext) : void
+        + postProcess(operationContext, queryResult) : void
+        + errorProcess(operationContext, exception) : void
+    }
+
+    class WriteInterceptor {
+        + preProcess(operationContext) : void
+        + postProcess(operationContext, writeResult) : void
+        + errorProcess(operationContext, exception) : void
+    }
+
+    class InterceptorChain {
+        + interceptors: List~OperationInterceptor~
+        + addInterceptor(interceptor) : void
+        + executePreFlow(operationContext) : void
+        + executePostFlow(operationContext, result) : void
+        + executeErrorFlow(operationContext, exception) : void
+    }
+
+    class OperationContext {
+        + traceContext: TraceContext
+        + operationType: Enum~Query/Write~
+        + operationParams: Map~String, Object~
+        + getTraceContext() : TraceContext
+        + setOperationResult(result) : void
+    }
+
+    class SDKConfigurator {
+        + configureExporter(exporter) : SDKConfigurator
+        + configurePropagator(propagator) : SDKConfigurator
+        + configureTracerProvider(provider) : SDKConfigurator
+        + initialize() : OpenTelemetrySDK
+    }
+
+    class TraceExporter {
+        <<Interface>>
+        + exportTraceData(traceDataList) : void
+    }
+
+    class ContextPropagator {
+        <<Interface>>
+        + inject(traceContext, carrier) : void
+        + extract(carrier) : TraceContext
+    }
+
+    class TracerProvider {
+        + getTracer(name) : Tracer
+    }
+
+    class Tracer {
+        + createTraceContext(operationName) : TraceContext
+        + endTraceContext(traceContext) : void
+    }
+
+    class OpenTelemetrySDK {
+        + getTracerProvider() : TracerProvider
+        + getContextPropagator() : ContextPropagator
+        + getTraceExporter() : TraceExporter
+    }
+
+    QueryInterceptor ..|> OperationInterceptor
+    WriteInterceptor ..|> OperationInterceptor
+    InterceptorChain o-- OperationInterceptor : contains
+    OperationContext o-- TraceContext : holds
+    ContextManager o-- TraceContext : manages
+
+    SDKConfigurator ..> TraceExporter : configures
+    SDKConfigurator ..> ContextPropagator : configures
+    SDKConfigurator ..> TracerProvider : configures
+    SDKConfigurator ..> OpenTelemetrySDK : initializes
+    OpenTelemetrySDK o-- TracerProvider : contains
+    OpenTelemetrySDK o-- ContextPropagator : contains
+    OpenTelemetrySDK o-- TraceExporter : contains
+    TracerProvider o-- Tracer : provides
+    Tracer ..> TraceContext : creates/ends
+
+    InterceptorChain ..> OperationContext : processes
+    Tracer ..> ContextManager : binds context
+```
+
+## Usage Example(Go language examples)
+
+```mermaid
+func main() {
+    var ctx = context.Background()
+    shutdown, err := setupOtelSDK(ctx)
+    if err != nil {
+        return
+    }
+    defer func() {
+        err = errors.Join(err, shutdown(ctx))
+    }()
+
+    config := &opengemini.Config{
+        Addresses: []opengemini.Address{{
+            Host: "127.0.0.1",
+            Port: 8086,
+        }},
+    }
+    client, err := opengemini.NewClient(config)
+    if err != nil {
+        fmt.Println(err)
+        return
+    }
+
+    client.Interceptors(opengemini.NewOtelInterceptor())
+
+    err = client.CreateDatabase("db0")
+    if err != nil {
+    }
+}
+```
+
 # QueryBuilder design
 
 ```mermaid

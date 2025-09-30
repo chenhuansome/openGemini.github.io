@@ -230,6 +230,177 @@ classDiagram
     SeriesResult "1" *-- "0..*" Series: contains
 ```
 
+# OpenTelemetry 集成设计
+为增强 OpenGemini 客户端的可观测性，便于追踪与查询、写入操作相关的性能指标、错误及其他信息，本方案采用拦截器模式集成 OpenTelemetry，实现全链路追踪。该设计支持非侵入式扩展，允许与其他拦截器（如日志、认证拦截器）共存，同时最大限度减少对原有客户端的修改。
+## 拦截器设计
+拦截器模式定义了标准化接口，用于挂钩客户端操作（查询/写入）并注入遥测逻辑。
+
+```mermaid
+Interceptor interface {
+	Query(ctx context.Context, query *InterceptorQuery) InterceptorClosure
+	Write(ctx context.Context, write *InterceptorWrite) InterceptorClosure
+}
+```
+
+## 定义基础客户端类，关联拦截器接口
+基础 Client 类管理一组拦截器，允许在客户端操作期间动态注册和执行拦截器逻辑。
+
+```mermaid
+class Client {
+- []Interceptor interceptors
+}
+```
+
+## 定义集成 OpenTelemetry 的拦截器实现类，实现 Interceptor 接口
+OtelClient 类实现 Interceptor 接口，嵌入 OpenTelemetry 逻辑以捕获客户端操作的跟踪、指标和日志。
+
+```mermaid
+class OtelClient {
+    Interceptor
+}
+```
+
+## 追踪系统核心模块
+
+```mermaid
+    class TraceContext {
+        + traceId: String
+        + parentTraceId: String
+        + operationName: String
+        + timestamp: Long
+        + attributes: Map~String, Object~
+        + createChildContext() : TraceContext
+        + addAttribute(key, value) : void
+        + getAttribute(key) : Object
+    }
+
+    class ContextManager {
+        + getCurrentContext() : TraceContext
+        + bindContext(context, task) : void
+        + unbindContext() : TraceContext
+    }
+
+    class OperationInterceptor {
+        <<Interface>>
+        + preProcess(operationContext) : void
+        + postProcess(operationContext, result) : void
+        + errorProcess(operationContext, exception) : void
+    }
+
+    class QueryInterceptor {
+        + preProcess(operationContext) : void
+        + postProcess(operationContext, queryResult) : void
+        + errorProcess(operationContext, exception) : void
+    }
+
+    class WriteInterceptor {
+        + preProcess(operationContext) : void
+        + postProcess(operationContext, writeResult) : void
+        + errorProcess(operationContext, exception) : void
+    }
+
+    class InterceptorChain {
+        + interceptors: List~OperationInterceptor~
+        + addInterceptor(interceptor) : void
+        + executePreFlow(operationContext) : void
+        + executePostFlow(operationContext, result) : void
+        + executeErrorFlow(operationContext, exception) : void
+    }
+
+    class OperationContext {
+        + traceContext: TraceContext
+        + operationType: Enum~Query/Write~
+        + operationParams: Map~String, Object~
+        + getTraceContext() : TraceContext
+        + setOperationResult(result) : void
+    }
+
+    class SDKConfigurator {
+        + configureExporter(exporter) : SDKConfigurator
+        + configurePropagator(propagator) : SDKConfigurator
+        + configureTracerProvider(provider) : SDKConfigurator
+        + initialize() : OpenTelemetrySDK
+    }
+
+    class TraceExporter {
+        <<Interface>>
+        + exportTraceData(traceDataList) : void
+    }
+
+    class ContextPropagator {
+        <<Interface>>
+        + inject(traceContext, carrier) : void
+        + extract(carrier) : TraceContext
+    }
+
+    class TracerProvider {
+        + getTracer(name) : Tracer
+    }
+
+    class Tracer {
+        + createTraceContext(operationName) : TraceContext
+        + endTraceContext(traceContext) : void
+    }
+
+    class OpenTelemetrySDK {
+        + getTracerProvider() : TracerProvider
+        + getContextPropagator() : ContextPropagator
+        + getTraceExporter() : TraceExporter
+    }
+
+    QueryInterceptor ..|> OperationInterceptor
+    WriteInterceptor ..|> OperationInterceptor
+    InterceptorChain o-- OperationInterceptor : contains
+    OperationContext o-- TraceContext : holds
+    ContextManager o-- TraceContext : manages
+
+    SDKConfigurator ..> TraceExporter : configures
+    SDKConfigurator ..> ContextPropagator : configures
+    SDKConfigurator ..> TracerProvider : configures
+    SDKConfigurator ..> OpenTelemetrySDK : initializes
+    OpenTelemetrySDK o-- TracerProvider : contains
+    OpenTelemetrySDK o-- ContextPropagator : contains
+    OpenTelemetrySDK o-- TraceExporter : contains
+    TracerProvider o-- Tracer : provides
+    Tracer ..> TraceContext : creates/ends
+
+    InterceptorChain ..> OperationContext : processes
+    Tracer ..> ContextManager : binds context
+```
+
+## 使用示例(Go language examples)
+
+```mermaid
+func main() {
+    var ctx = context.Background()
+    shutdown, err := setupOtelSDK(ctx)
+    if err != nil {
+        return
+    }
+    defer func() {
+        err = errors.Join(err, shutdown(ctx))
+    }()
+
+    config := &opengemini.Config{
+        Addresses: []opengemini.Address{{
+            Host: "127.0.0.1",
+            Port: 8086,
+        }},
+    }
+    client, err := opengemini.NewClient(config)
+    if err != nil {
+        fmt.Println(err)
+        return
+    }
+
+    client.Interceptors(opengemini.NewOtelInterceptor())
+
+    err = client.CreateDatabase("db0")
+    if err != nil {
+    }
+}
+```
+
 # 查询构造器设计
 
 ```mermaid
